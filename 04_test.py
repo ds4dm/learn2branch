@@ -7,6 +7,7 @@ import numpy as np
 import time
 import pickle
 import pathlib
+import gzip
 
 import tensorflow as tf
 import tensorflow.contrib.eager as tfe
@@ -30,7 +31,7 @@ def load_batch_gcnn(sample_files):
 
     # load samples
     for filename in sample_files:
-        with open(filename, 'rb') as f:
+        with gzip.open(filename, 'rb') as f:
             sample = pickle.load(f)
 
         sample_state, _, sample_action, sample_cands, cand_scores = sample['data']

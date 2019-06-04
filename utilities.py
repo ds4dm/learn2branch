@@ -3,6 +3,7 @@ import numpy as np
 import scipy.sparse as sp
 import pyscipopt as scip
 import pickle
+import gzip
 
 def log(str, logfile=None):
     str = f'[{datetime.datetime.now()}] {str}'
@@ -342,7 +343,7 @@ def preprocess_variable_features(features, interaction_augmentation, normalizati
 
 
 def load_flat_samples(filename, feat_type, label_type, augment_feats, normalize_feats):
-    with open(filename, 'rb') as file:
+    with gzip.open(filename, 'rb') as file:
         sample = pickle.load(file)
 
     state, khalil_state, best_cand, cands, cand_scores = sample['data']

@@ -7,6 +7,7 @@ import pickle
 import numpy as np
 from time import strftime
 from shutil import copyfile
+import gzip
 
 import tensorflow as tf
 import tensorflow.contrib.eager as tfe
@@ -28,7 +29,7 @@ def load_batch(sample_files):
 
     # load samples
     for filename in sample_files:
-        with open(filename, 'rb') as f:
+        with gzip.open(filename, 'rb') as f:
             sample = pickle.load(f)
 
         state, khalil_state, expert_action, cand_actions, *_ = sample['data']

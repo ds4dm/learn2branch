@@ -1,5 +1,9 @@
 # Exact Combinatorial Optimization with Graph Convolutional Neural Networks
 
+Maxime Gasse, Didier Chételat, Nicola Ferroni, Laurent Charlin, Andrea Lodi
+
+https://arxiv.org/abs/1906.01629
+
 ## Installing the dependencies
 
 Recommended: conda + python 3

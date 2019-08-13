@@ -43,10 +43,10 @@ cd scip-6.0.1/
 Apply patches in `learn2branch/scip_patch/`
 
 ```
-patch -p1 ../learn2branch/scip_patch/0001-vanillafullstrong-branching-rule-initial-version.patch
-patch -p1 ../learn2branch/scip_patch/0002-Vanillafullstrong-bugfixes.patch
-patch -p1 ../learn2branch/scip_patch/0003-vanillafulltrong-implemented-indempotent-functionali.patch
-patch -p1 ../learn2branch/scip_patch/0004-Compilation-fix.patch
+patch -p1 < ../learn2branch/scip_patch/0001-vanillafullstrong-branching-rule-initial-version.patch
+patch -p1 < ../learn2branch/scip_patch/0002-Vanillafullstrong-bugfixes.patch
+patch -p1 < ../learn2branch/scip_patch/0003-vanillafulltrong-implemented-indempotent-functionali.patch
+patch -p1 < ../learn2branch/scip_patch/0004-Compilation-fix.patch
 ```
 
 ```

@@ -17,6 +17,11 @@ conda install tensorflow-gpu=1.12.0
 
 ### SCIP
 
+Set-up a desired installation path for SCIP / SoPlex (e.g., `/opt/scip`):
+```
+export SCIPOPTDIR='/opt/scip'
+```
+
 SoPlex 4.0.1 (free for academic uses)
 
 https://soplex.zib.de/download.php?fname=soplex-4.0.1.tgz
@@ -25,7 +30,7 @@ https://soplex.zib.de/download.php?fname=soplex-4.0.1.tgz
 tar -xzf soplex-4.0.1.tgz
 cd soplex-4.0.1/
 mkdir build
-cmake -S . -B build -DCMAKE_INSTALL_PREFIX="YOUR_INSTALL_DIR"
+cmake -S . -B build -DCMAKE_INSTALL_PREFIX=$SCIPOPTDIR
 make -C ./build -j 4
 make -C ./build install
 cd ..
@@ -51,7 +56,7 @@ patch -p1 < ../learn2branch/scip_patch/0004-Compilation-fix.patch
 
 ```
 mkdir build
-cmake -S . -B build -DSOPLEX_DIR="YOUR_INSTALL_DIR" -DCMAKE_INSTALL_PREFIX="YOUR_INSTALL_DIR"
+cmake -S . -B build -DSOPLEX_DIR=$SCIPOPTDIR -DCMAKE_INSTALL_PREFIX=$SCIPOPTDIR
 make -C ./build -j 4
 make -C ./build install
 cd ..
@@ -73,7 +78,7 @@ conda install cython
 SCIP's python interface (modified version)
 
 ```
-SCIPOPTDIR="YOUR_INSTALL_DIR" pip install git+https://github.com/ds4dm/PySCIPOpt.git@ml-branching
+pip install git+https://github.com/ds4dm/PySCIPOpt.git@ml-branching
 ```
 
 ### ExtraTrees

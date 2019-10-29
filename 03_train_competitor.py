@@ -44,7 +44,7 @@ if __name__ == '__main__':
     parser.add_argument(
         'problem',
         help='MILP instance type to process.',
-        choices=['setcover', 'cauctions', 'facilities'],
+        choices=['setcover', 'cauctions', 'facilities', 'indset'],
     )
     parser.add_argument(
         '-m', '--model',
@@ -66,12 +66,13 @@ if __name__ == '__main__':
         'setcover': 'setcover/500r_1000c_0.05d',
         'cauctions': 'cauctions/100_500',
         'facilities': 'facilities/100_100_5',
+        'indset': 'indset/500_4',
     }
     problem_folder = problem_folders[args.problem]
 
     if args.model == 'extratrees':
-        train_max_size = 100000
-        valid_max_size = 100000  # np.inf
+        train_max_size = 250000
+        valid_max_size = 100000
         feat_type = 'gcnn_agg'
         feat_qbnorm = False
         feat_augment = False

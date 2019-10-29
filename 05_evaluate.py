@@ -4,7 +4,7 @@ import importlib
 import argparse
 import csv
 import numpy as np
-from time import strftime
+import time
 import pickle
 
 import pyscipopt as scip
@@ -44,7 +44,7 @@ class PolicyBranching(scip.Branchrule):
         else:
             raise NotImplementedError
 
-    def branchinit(self):
+    def branchinitsol(self):
         self.ndomchgs = 0
         self.ncutoffs = 0
         self.state_buffer = {}
@@ -84,7 +84,7 @@ class PolicyBranching(scip.Branchrule):
                     tf.convert_to_tensor([v['values'].shape[0]], dtype=tf.int32),
                 )
 
-                var_logits = self.policy(state).numpy().squeeze(0)
+                var_logits = self.policy(state, tf.convert_to_tensor(False)).numpy().squeeze(0)
 
                 candidate_scores = var_logits[candidate_mask]
                 best_var = candidate_vars[candidate_scores.argmax()]
@@ -121,10 +121,6 @@ class PolicyBranching(scip.Branchrule):
         elif result == scip.SCIP_RESULT.CUTOFF:
             self.ncutoffs += 1
 
-        # reset root state buffer, as more cuts may still be added
-        if self.model.getNNodes() == 1:
-            self.state_buffer.clear()
-
         return {'result': result}
 
 
@@ -133,7 +129,7 @@ if __name__ == '__main__':
     parser.add_argument(
         'problem',
         help='MILP instance type to process.',
-        choices=['setcover', 'cauctions', 'facilities'],
+        choices=['setcover', 'cauctions', 'facilities', 'indset'],
     )
     parser.add_argument(
         '-g', '--gpu',
@@ -143,7 +139,7 @@ if __name__ == '__main__':
     )
     args = parser.parse_args()
 
-    result_file = f"{args.problem}_{strftime('%Y%m%d-%H%M%S')}.csv"
+    result_file = f"{args.problem}_{time.strftime('%Y%m%d-%H%M%S')}.csv"
     instances = []
     seeds = [0, 1, 2, 3, 4]
     gcnn_models = ['baseline']
@@ -166,6 +162,11 @@ if __name__ == '__main__':
         instances += [{'type': 'small', 'path': f"data/instances/facilities/transfer_100_100_5/instance_{i+1}.lp"} for i in range(20)]
         instances += [{'type': 'medium', 'path': f"data/instances/facilities/transfer_200_100_5/instance_{i+1}.lp"} for i in range(20)]
         instances += [{'type': 'big', 'path': f"data/instances/facilities/transfer_400_100_5/instance_{i+1}.lp"} for i in range(20)]
+
+    elif args.problem == 'indset':
+        instances += [{'type': 'small', 'path': f"data/instances/indset/transfer_500_4/instance_{i+1}.lp"} for i in range(20)]
+        instances += [{'type': 'medium', 'path': f"data/instances/indset/transfer_1000_4/instance_{i+1}.lp"} for i in range(20)]
+        instances += [{'type': 'big', 'path': f"data/instances/indset/transfer_1500_4/instance_{i+1}.lp"} for i in range(20)]
 
     else:
         raise NotImplementedError
@@ -257,6 +258,8 @@ if __name__ == '__main__':
         'status',
         'ndomchgs',
         'ncutoffs',
+        'walltime',
+        'proctime',
     ]
     os.makedirs('results', exist_ok=True)
     with open(f"results/{result_file}", 'w', newline='') as csvfile:
@@ -273,7 +276,7 @@ if __name__ == '__main__':
                 m.setIntParam('display/verblevel', 0)
                 m.readProblem(f"{instance['path']}")
                 utilities.init_scip_params(m, seed=policy['seed'])
-                m.setIntParam('timing/clocktype', 2)  # 1: CPU user seconds, 2: wall clock time
+                m.setIntParam('timing/clocktype', 1)  # 1: CPU user seconds, 2: wall clock time
                 m.setRealParam('limits/time', time_limit)
 
                 brancher = PolicyBranching(policy)
@@ -283,7 +286,13 @@ if __name__ == '__main__':
                     desc=f"Custom PySCIPOpt branching policy.",
                     priority=666666, maxdepth=-1, maxbounddist=1)
 
+                walltime = time.perf_counter()
+                proctime = time.process_time()
+
                 m.optimize()
+
+                walltime = time.perf_counter() - walltime
+                proctime = time.process_time() - proctime
 
                 stime = m.getSolvingTime()
                 nnodes = m.getNNodes()
@@ -305,10 +314,12 @@ if __name__ == '__main__':
                     'status': status,
                     'ndomchgs': ndomchgs,
                     'ncutoffs': ncutoffs,
+                    'walltime': walltime,
+                    'proctime': proctime,
                 })
 
                 csvfile.flush()
                 m.freeProb()
 
-                print(f"  {policy['type']}:{policy['name']} {policy['seed']} - {nnodes} ({nnodes+2*(ndomchgs+ncutoffs)}) nodes {nlps} lps ({stime} s. {status})")
+                print(f"  {policy['type']}:{policy['name']} {policy['seed']} - {nnodes} ({nnodes+2*(ndomchgs+ncutoffs)}) nodes {nlps} lps {stime:.2f} ({walltime:.2f} wall {proctime:.2f} proc) s. {status}")
 

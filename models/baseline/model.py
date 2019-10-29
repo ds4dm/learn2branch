@@ -22,7 +22,7 @@ class PreNormLayer(K.layers.Layer):
             self.shift = self.add_weight(
                 name=f'{self.name}/shift',
                 shape=(n_units,),
-                trainable=True,
+                trainable=False,
                 initializer=tf.keras.initializers.constant(value=np.zeros((n_units,)),
                 dtype=tf.float32),
             )
@@ -33,7 +33,7 @@ class PreNormLayer(K.layers.Layer):
             self.scale = self.add_weight(
                 name=f'{self.name}/scale',
                 shape=(n_units,),
-                trainable=True,
+                trainable=False,
                 initializer=tf.keras.initializers.constant(value=np.ones((n_units,)),
                 dtype=tf.float32),
             )
@@ -100,11 +100,11 @@ class PreNormLayer(K.layers.Layer):
         """
         assert self.count > 0
         if self.shift is not None:
-            self.shift.assign_sub(self.avg)
+            self.shift.assign(-self.avg)
         
         if self.scale is not None:
             self.var = tf.where(tf.equal(self.var, 0), tf.ones_like(self.var), self.var)  # NaN check trick
-            self.scale.assign(self.scale / np.sqrt(self.var))
+            self.scale.assign(1 / np.sqrt(self.var))
         
         del self.avg, self.var, self.m2, self.count
         self.waiting_updates = False
@@ -139,9 +139,13 @@ class BipartiteGraphConvolution(K.Model):
             K.layers.Dense(units=self.emb_size, activation=None, kernel_initializer=self.initializer)
         ])
 
+        self.post_conv_module = K.Sequential([
+            PreNormLayer(1, shift=False),  # normalize after convolution
+        ])
+
         # output_layers
         self.output_module = K.Sequential([
-            PreNormLayer(1, shift=False),  # normalize after convolution
+            K.layers.Dense(units=self.emb_size, activation=None, kernel_initializer=self.initializer),
             K.layers.Activation(self.activation),
             K.layers.Dense(units=self.emb_size, activation=None, kernel_initializer=self.initializer),
         ])
@@ -153,10 +157,11 @@ class BipartiteGraphConvolution(K.Model):
         self.feature_module_edge.build(ev_shape)
         self.feature_module_right.build(r_shape)
         self.feature_module_final.build([None, self.emb_size])
+        self.post_conv_module.build([None, self.emb_size])
         self.output_module.build([None, self.emb_size + (l_shape[1] if self.right_to_left else r_shape[1])])
         self.built = True
 
-    def call(self, inputs):
+    def call(self, inputs, training):
         """
         Perfoms a partial graph convolution on the given bipartite graph.
 
@@ -172,8 +177,20 @@ class BipartiteGraphConvolution(K.Model):
             Features of the right-hand-side nodes in the bipartite graph
         scatter_out_size: 1D int tensor
             Output size (left_features.shape[0] or right_features.shape[0], unknown at compile time)
+
+        Other parameters
+        ----------------
+        training: boolean
+            Training mode indicator
         """
         left_features, edge_indices, edge_features, right_features, scatter_out_size = inputs
+
+        if self.right_to_left:
+            scatter_dim = 0
+            prev_features = left_features
+        else:
+            scatter_dim = 1
+            prev_features = right_features
 
         # compute joint features
         joint_features = self.feature_module_final(
@@ -190,18 +207,12 @@ class BipartiteGraphConvolution(K.Model):
         )
 
         # perform convolution
-        if self.right_to_left:
-            scatter_dim = 0
-            prev_features = left_features
-        else:
-            scatter_dim = 1
-            prev_features = right_features
-
         conv_output = tf.scatter_nd(
             updates=joint_features,
             indices=tf.expand_dims(edge_indices[scatter_dim], axis=1),
             shape=[scatter_out_size, self.emb_size]
         )
+        conv_output = self.post_conv_module(conv_output)
 
         # apply final module
         output = self.output_module(tf.concat([
@@ -306,7 +317,7 @@ class GCNPolicy(BaseModel):
         # OUTPUT
         self.output_module = K.Sequential([
             K.layers.Dense(units=self.emb_size, activation=self.activation, kernel_initializer=self.initializer),
-            K.layers.Dense(units=1, activation=None, kernel_initializer=self.initializer),
+            K.layers.Dense(units=1, activation=None, kernel_initializer=self.initializer, use_bias=False),
         ])
 
         # build model right-away
@@ -332,6 +343,7 @@ class GCNPolicy(BaseModel):
                 tf.contrib.eager.TensorSpec(shape=[None], dtype=tf.int32),
                 tf.contrib.eager.TensorSpec(shape=[None], dtype=tf.int32),
             ),
+            tf.contrib.eager.TensorSpec(shape=[], dtype=tf.bool),
         ]
 
     def build(self, input_shapes):
@@ -367,7 +379,7 @@ class GCNPolicy(BaseModel):
 
         return output
 
-    def call(self, inputs):
+    def call(self, inputs, training):
         """
         Accepts stacked mini-batches, i.e. several bipartite graphs aggregated
         as one. In that case the number of variables per samples has to be
@@ -392,6 +404,11 @@ class GCNPolicy(BaseModel):
             Number of constraints for each of the samples stacked in the batch.
         n_vars_per_sample: 1D int tensor
             Number of variables for each of the samples stacked in the batch.
+
+        Other parameters
+        ----------------
+        training: boolean
+            Training mode indicator
         """
         constraint_features, edge_indices, edge_features, variable_features, n_cons_per_sample, n_vars_per_sample = inputs
         n_cons_total = tf.reduce_sum(n_cons_per_sample)
@@ -404,11 +421,11 @@ class GCNPolicy(BaseModel):
 
         # GRAPH CONVOLUTIONS
         constraint_features = self.conv_v_to_c((
-            constraint_features, edge_indices, edge_features, variable_features, n_cons_total))
+            constraint_features, edge_indices, edge_features, variable_features, n_cons_total), training)
         constraint_features = self.activation(constraint_features)
 
         variable_features = self.conv_c_to_v((
-            constraint_features, edge_indices, edge_features, variable_features, n_vars_total))
+            constraint_features, edge_indices, edge_features, variable_features, n_vars_total), training)
         variable_features = self.activation(variable_features)
 
         # OUTPUT

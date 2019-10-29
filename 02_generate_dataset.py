@@ -54,27 +54,31 @@ class SamplingAgent(scip.Branchrule):
 
             data = [state, state_khalil, expert_action, action_set, scores]
 
-            filename = f'{self.out_dir}/sample_{self.episode}_{self.sample_counter}.pkl'
-            with gzip.open(filename, 'wb') as f:
-                pickle.dump({
+            # Do not record inconsistent scores. May happen if SCIP was early stopped (time limit).
+            if not any([s < 0 for s in scores]):
+
+                filename = f'{self.out_dir}/sample_{self.episode}_{self.sample_counter}.pkl'
+                with gzip.open(filename, 'wb') as f:
+                    pickle.dump({
+                        'episode': self.episode,
+                        'instance': self.instance,
+                        'seed': self.seed,
+                        'node_number': self.model.getCurrentNode().getNumber(),
+                        'node_depth': self.model.getCurrentNode().getDepth(),
+                        'data': data,
+                        }, f)
+
+                self.out_queue.put({
+                    'type': 'sample',
+                    'episode': self.episode,
                     'instance': self.instance,
                     'seed': self.seed,
                     'node_number': self.model.getCurrentNode().getNumber(),
                     'node_depth': self.model.getCurrentNode().getDepth(),
-                    'data': data,
-                    }, f)
+                    'filename': filename,
+                })
 
-            self.out_queue.put({
-                'type': 'sample',
-                'episode': self.episode,
-                'instance': self.instance,
-                'seed': self.seed,
-                'node_number': self.model.getCurrentNode().getNumber(),
-                'node_depth': self.model.getCurrentNode().getDepth(),
-                'filename': filename,
-            })
-
-            self.sample_counter += 1
+                self.sample_counter += 1
 
         # if exploration and expert policies are the same, prevent running it twice
         if not query_expert or (not self.follow_expert and self.exploration_policy != 'vanillafullstrong'):
@@ -131,7 +135,7 @@ def make_samples(in_queue, out_queue):
         m.setBoolParam('branching/vanillafullstrong/scoreall', True)
         m.setBoolParam('branching/vanillafullstrong/collectscores', True)
         m.setBoolParam('branching/vanillafullstrong/donotbranch', True)
-        m.setBoolParam('branching/vanillafullstrong/indempotent', True)
+        m.setBoolParam('branching/vanillafullstrong/idempotent', True)
 
         out_queue.put({
             'type': 'start',
@@ -293,7 +297,7 @@ if __name__ == '__main__':
     parser.add_argument(
         'problem',
         help='MILP instance type to process.',
-        choices=['setcover', 'cauctions', 'facilities'],
+        choices=['setcover', 'cauctions', 'facilities', 'indset'],
     )
     parser.add_argument(
         '-s', '--seed',
@@ -329,6 +333,12 @@ if __name__ == '__main__':
         instances_valid = glob.glob('data/instances/cauctions/valid_100_500/*.lp')
         instances_test = glob.glob('data/instances/cauctions/test_100_500/*.lp')
         out_dir = 'data/samples/cauctions/100_500'
+
+    elif args.problem == 'indset':
+        instances_train = glob.glob('data/instances/indset/train_500_4/*.lp')
+        instances_valid = glob.glob('data/instances/indset/valid_500_4/*.lp')
+        instances_test = glob.glob('data/instances/indset/test_500_4/*.lp')
+        out_dir = 'data/samples/indset/500_4'
 
     elif args.problem == 'facilities':
         instances_train = glob.glob('data/instances/facilities/train_100_100_5/*.lp')

@@ -25,6 +25,9 @@ def init_scip_params(model, seed, heuristics=True, presolving=True, separating=T
     # separation only at root node
     model.setIntParam('separating/maxrounds', 0)
 
+    # no restart
+    model.setIntParam('presolving/maxrestarts', 0)
+
     # if asked, disable presolving
     if not presolving:
         model.setIntParam('presolving/maxrounds', 0)
@@ -68,7 +71,7 @@ def extract_state(model, buffer=None):
     constraint_features : dictionary of type {'names': list, 'values': np.ndarray}
         The features associated with the constraint nodes in the bipartite graph.
     """
-    if buffer is None:
+    if buffer is None or model.getNNodes() == 1:
         buffer = {}
 
     # update state from buffer if any

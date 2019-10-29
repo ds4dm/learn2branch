@@ -15,75 +15,14 @@ import tensorflow.contrib.eager as tfe
 import utilities
 from utilities import log
 
-
-def load_batch(sample_files):
-    """
-    Loads and concatenates a bunch of samples into one mini-batch.
-    """
-    c_features = []
-    e_indices = []
-    e_features = []
-    v_features = []
-    cand_actionss = []
-    expert_actions = []
-
-    # load samples
-    for filename in sample_files:
-        with gzip.open(filename, 'rb') as f:
-            sample = pickle.load(f)
-
-        state, khalil_state, expert_action, cand_actions, *_ = sample['data']
-
-        cand_actions = np.array(cand_actions)
-        expert_action = np.where(cand_actions == expert_action)[0][0]  # best action relative to candidates
-
-        c, e, v = state
-        c_features.append(c['values'])
-        e_indices.append(e['indices'])
-        e_features.append(e['values'])
-        v_features.append(v['values'])
-        expert_actions.append(expert_action)
-        cand_actionss.append(cand_actions)
-
-    n_cs_per_sample = [c.shape[0] for c in c_features]
-    n_vs_per_sample = [v.shape[0] for v in v_features]
-    n_cands_per_sample = [cands.shape[0] for cands in cand_actionss]
-
-    # concatenate samples in one big graph
-    c_features = np.concatenate(c_features, axis=0)
-    v_features = np.concatenate(v_features, axis=0)
-    e_features = np.concatenate(e_features, axis=0)
-    # edge indices have to be adjusted accordingly
-    cv_shift = np.cumsum([
-            [0] + n_cs_per_sample[:-1],
-            [0] + n_vs_per_sample[:-1]
-        ], axis=1)
-    e_indices = np.concatenate([e_ind + cv_shift[:, j:(j+1)]
-                                for j, e_ind in enumerate(e_indices)], axis=1)
-    # candidate indexes as well
-    cand_actionss = np.concatenate([cands + shift
-        for cands, shift in zip(cand_actionss, cv_shift[1])])
-    expert_actions = np.array(expert_actions)
-
-    # convert to tensors
-    c_features = tf.convert_to_tensor(c_features, dtype=tf.float32)
-    e_indices = tf.convert_to_tensor(e_indices, dtype=tf.int32)
-    e_features = tf.convert_to_tensor(e_features, dtype=tf.float32)
-    v_features = tf.convert_to_tensor(v_features, dtype=tf.float32)
-    n_cs_per_sample = tf.convert_to_tensor(n_cs_per_sample, dtype=tf.int32)
-    n_vs_per_sample = tf.convert_to_tensor(n_vs_per_sample, dtype=tf.int32)
-    expert_actions = tf.convert_to_tensor(expert_actions, dtype=tf.int32)
-    cand_actionss = tf.convert_to_tensor(cand_actionss, dtype=tf.int32)
-    n_cands_per_sample = tf.convert_to_tensor(n_cands_per_sample, dtype=tf.int32)
-
-    return c_features, e_indices, e_features, v_features, n_cs_per_sample, n_vs_per_sample, n_cands_per_sample, cand_actionss, expert_actions
+from utilities_tf import load_batch_gcnn
 
 
 def load_batch_tf(x):
     return tf.py_func(
-        load_batch,
+        load_batch_gcnn,
         [x],
-        [tf.float32, tf.int32, tf.float32, tf.float32, tf.int32, tf.int32, tf.int32, tf.int32, tf.int32])
+        [tf.float32, tf.int32, tf.float32, tf.float32, tf.int32, tf.int32, tf.int32, tf.int32, tf.int32, tf.float32])
 
 
 def pretrain(model, dataloader):
@@ -104,10 +43,10 @@ def pretrain(model, dataloader):
     i = 0
     while True:
         for batch in dataloader:
-            c, ei, ev, v, n_cs, n_vs, n_cands, cands, actions = batch
+            c, ei, ev, v, n_cs, n_vs, n_cands, cands, best_cands, cand_scores = batch
             batched_states = (c, ei, ev, v, n_cs, n_vs)
 
-            if not model.pre_train(batched_states):
+            if not model.pre_train(batched_states, tf.convert_to_tensor(True)):
                 break
 
         res = model.pre_train_next()
@@ -127,28 +66,36 @@ def process(model, dataloader, top_k, optimizer=None):
 
     n_samples_processed = 0
     for batch in dataloader:
-        c, ei, ev, v, n_cs, n_vs, n_cands, cands, actions = batch
+        c, ei, ev, v, n_cs, n_vs, n_cands, cands, best_cands, cand_scores = batch
         batched_states = (c, ei, ev, v, tf.reduce_sum(n_cs, keepdims=True), tf.reduce_sum(n_vs, keepdims=True))  # prevent padding
         batch_size = len(n_cs.numpy())
 
         if optimizer:
             with tf.GradientTape() as tape:
-                logits = model(batched_states)
+                logits = model(batched_states, tf.convert_to_tensor(True)) # training mode
                 logits = tf.expand_dims(tf.gather(tf.squeeze(logits, 0), cands), 0)  # filter candidate variables
                 logits = model.pad_output(logits, n_cands.numpy())  # apply padding now
-                loss = tf.losses.sparse_softmax_cross_entropy(labels=actions, logits=logits)
+                loss = tf.losses.sparse_softmax_cross_entropy(labels=best_cands, logits=logits)
             grads = tape.gradient(target=loss, sources=model.variables)
             optimizer.apply_gradients(zip(grads, model.variables))
         else:
-            logits = model(batched_states)
+            logits = model(batched_states, tf.convert_to_tensor(False))  # eval mode
             logits = tf.expand_dims(tf.gather(tf.squeeze(logits, 0), cands), 0)  # filter candidate variables
             logits = model.pad_output(logits, n_cands.numpy())  # apply padding now
-            loss = tf.losses.sparse_softmax_cross_entropy(labels=actions, logits=logits)
+            loss = tf.losses.sparse_softmax_cross_entropy(labels=best_cands, logits=logits)
 
-        kacc = np.array([
-            tf.reduce_mean(tf.cast(tf.nn.in_top_k(predictions=logits, targets=actions, k=k), tf.float32)).numpy()
-            for k in top_k
-        ])
+        true_scores = model.pad_output(tf.reshape(cand_scores, (1, -1)), n_cands)
+        true_bestscore = tf.reduce_max(true_scores, axis=-1, keepdims=True)
+        true_scores = true_scores.numpy()
+        true_bestscore = true_bestscore.numpy()
+
+        kacc = []
+        for k in top_k:
+            pred_top_k = tf.nn.top_k(logits, k=k)[1].numpy()
+            pred_top_k_true_scores = np.take_along_axis(true_scores, pred_top_k, axis=1)
+            kacc.append(np.mean(np.any(pred_top_k_true_scores == true_bestscore, axis=1)))
+        kacc = np.asarray(kacc)
+
         mean_loss += loss.numpy() * batch_size
         mean_kacc += kacc * batch_size
         n_samples_processed += batch_size
@@ -164,7 +111,7 @@ if __name__ == '__main__':
     parser.add_argument(
         'problem',
         help='MILP instance type to process.',
-        choices=['setcover', 'cauctions', 'facilities'],
+        choices=['setcover', 'cauctions', 'facilities', 'indset'],
     )
     parser.add_argument(
         '-m', '--model',
@@ -196,21 +143,16 @@ if __name__ == '__main__':
     patience = 10
     early_stopping = 20
     top_k = [1, 3, 5, 10]
+    train_ncands_limit = np.inf
+    valid_ncands_limit = np.inf
 
-    if args.problem == 'setcover':
-        train_files = list(pathlib.Path('data/samples/setcover/500r_1000c_0.05d/train').glob('sample_*.pkl'))
-        valid_files = list(pathlib.Path('data/samples/setcover/500r_1000c_0.05d/valid').glob('sample_*.pkl'))
-
-    elif args.problem == 'cauctions':
-        train_files = list(pathlib.Path('data/samples/cauctions/100_500/train').glob('sample_*.pkl'))
-        valid_files = list(pathlib.Path('data/samples/cauctions/100_500/valid').glob('sample_*.pkl'))
-
-    elif args.problem == 'facilities':
-        train_files = list(pathlib.Path('data/samples/facilities/100_100_5/train').glob('sample_*.pkl'))
-        valid_files = list(pathlib.Path('data/samples/facilities/100_100_5/valid').glob('sample_*.pkl'))
-
-    else:
-        raise NotImplementedError
+    problem_folders = {
+        'setcover': 'setcover/500r_1000c_0.05d',
+        'cauctions': 'cauctions/100_500',
+        'facilities': 'facilities/100_100_5',
+        'indset': 'indset/500_4',
+    }
+    problem_folder = problem_folders[args.problem]
 
     running_dir = f"trained_models/{args.problem}/{args.model}/{args.seed}"
 
@@ -246,7 +188,33 @@ if __name__ == '__main__':
     tf.set_random_seed(rng.randint(np.iinfo(int).max))
 
     ### SET-UP DATASET ###
+    train_files = list(pathlib.Path(f'data/samples/{problem_folder}/train').glob('sample_*.pkl'))
+    valid_files = list(pathlib.Path(f'data/samples/{problem_folder}/valid').glob('sample_*.pkl'))
+
+
+    def take_subset(sample_files, cands_limit):
+        nsamples = 0
+        ncands = 0
+        for filename in sample_files:
+            with gzip.open(filename, 'rb') as file:
+                sample = pickle.load(file)
+
+            _, _, _, cands, _ = sample['data']
+            ncands += len(cands)
+            nsamples += 1
+
+            if ncands >= cands_limit:
+                log(f"  dataset size limit reached ({cands_limit} candidate variables)", logfile)
+                break
+
+        return sample_files[:nsamples]
+
+
+    if train_ncands_limit < np.inf:
+        train_files = take_subset(rng.permutation(train_files), train_ncands_limit)
     log(f"{len(train_files)} training samples", logfile)
+    if valid_ncands_limit < np.inf:
+        valid_files = take_subset(valid_files, valid_ncands_limit)
     log(f"{len(valid_files)} validation samples", logfile)
 
     train_files = [str(x) for x in train_files]

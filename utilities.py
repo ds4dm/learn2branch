@@ -76,6 +76,7 @@ def extract_state(model, buffer=None):
 
     # update state from buffer if any
     s = model.getState(buffer['scip_state'] if 'scip_state' in buffer else None)
+    buffer['scip_state'] = s
 
     if 'state' in buffer:
         obj_norm = buffer['state']['obj_norm']

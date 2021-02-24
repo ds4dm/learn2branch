@@ -1,10 +1,10 @@
+__Update__: check out library [Ecole](https://doc.ecole.ai), which reimplements everything you'll need for learning to branch, in a nice and clean Python package ([paper here](https://arxiv.org/abs/2011.06069)).
+
 # Exact Combinatorial Optimization with Graph Convolutional Neural Networks
 
 Maxime Gasse, Didier Chételat, Nicola Ferroni, Laurent Charlin, Andrea Lodi
 
 This is the official implementation of our NeurIPS 2019 [paper](https://arxiv.org/abs/1906.01629).
-
-__Update__: check out library [Ecole](https://doc.ecole.ai), which reimplements everything you'll need for learning to branch, in a nice and clean Python package ([paper here](https://arxiv.org/abs/2011.06069)).
 
 ## Installation
 

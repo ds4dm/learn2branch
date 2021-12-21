@@ -250,7 +250,7 @@ def generate_setcover(nrows, ncols, density, filename, rng, max_coef=100):
 
 
 def generate_cauctions(random, filename, n_items=100, n_bids=500, min_value=1, max_value=100,
-                       value_deviation=0.5, add_item_prob=0.9, max_n_sub_bids=5,
+                       value_deviation=0.5, add_item_prob=0.7, max_n_sub_bids=5,
                        additivity=0.2, budget_factor=1.5, resale_factor=0.5,
                        integers=False, warnings=False):
     """
